@@ -5,8 +5,6 @@ import readline from "node:readline";
 
 const tracePath = process.env.SAFE_SWITCH_TEST_TRACE;
 if (!tracePath) throw new Error("SAFE_SWITCH_TEST_TRACE is required");
-const testMode = process.env.SAFE_SWITCH_TEST_MODE || "automatic";
-
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
@@ -94,6 +92,27 @@ lines.on("line", (line) => {
   }
 
   if (message.method === "turn/start") {
+    const inputText = (message.params?.input || [])
+      .filter((part) => part?.type === "text")
+      .map((part) => part.text)
+      .join("\n")
+      .trim();
+    if (inputText === "/goanyway") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { turn: { id: "turn-passthrough", status: "inProgress", items: [], error: null } },
+      });
+      send({
+        jsonrpc: "2.0",
+        method: "turn/completed",
+        params: {
+          threadId: "source-thread",
+          turn: { id: "turn-passthrough", status: "completed", items: [], error: null },
+        },
+      });
+      return;
+    }
     send({
       jsonrpc: "2.0",
       id: message.id,
@@ -110,9 +129,7 @@ lines.on("line", (line) => {
           items: [],
           error: {
             message:
-              testMode === "manual"
-                ? "account context mismatch with an unrecognized error shape"
-                : "Invalid 'input[7].encrypted_content': the encrypted content could not be decrypted",
+              "Invalid 'input[7].encrypted_content': the encrypted content could not be decrypted",
           },
         },
       },

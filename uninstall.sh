@@ -3,7 +3,7 @@ set -eu
 
 codex_home="$HOME/.codex"
 install_dir="$codex_home/safe-switch-proxy"
-prompt_path="$codex_home/prompts/goanyway.md"
+legacy_prompt="$codex_home/prompts/goanyway.md"
 profile_path="$HOME/.zprofile"
 launch_agent="$HOME/Library/LaunchAgents/com.pzs19.cdx-resume.plist"
 remove_files=0
@@ -34,8 +34,8 @@ if [[ -f "$profile_path" ]]; then
   mv "$temp_profile" "$profile_path"
 fi
 
-if [[ -f "$prompt_path" ]] && grep -Fq '__CODEX_GOANYWAY_RECOVERY__' "$prompt_path"; then
-  rm "$prompt_path"
+if [[ -f "$legacy_prompt" ]] && grep -Fq '__CODEX_GOANYWAY_RECOVERY__' "$legacy_prompt"; then
+  rm "$legacy_prompt"
 fi
 
 if (( remove_files )); then

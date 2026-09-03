@@ -13,8 +13,6 @@ It does **not** modify `app.asar` or replace the signed application bundle. Inst
 - Copies visible user and assistant messages into the fresh thread.
 - Intentionally drops encrypted content, hidden reasoning, and tool execution state.
 - Replays the latest user request and opens the recovered thread.
-- Supports manual recovery by typing `/goanyway`.
-- Adds `/prompts:goanyway` to the slash menu using Codex Desktop's built-in custom prompt loader.
 
 The original thread is kept unchanged.
 
@@ -38,17 +36,15 @@ cd ~/.codex/safe-switch-proxy
 ./install.sh
 ```
 
-Fully quit Codex Desktop with `Cmd+Q`, then reopen it. Closing only the window is not enough because custom prompts are loaded when a renderer starts.
+Fully quit Codex Desktop with `Cmd+Q`, then reopen it so the app starts the proxy.
 
 The installer also creates a per-user LaunchAgent so `CODEX_CLI_PATH` is restored after login or reboot.
 
 ## Usage
 
-- Normal case: do nothing. Recovery starts automatically after a recognized decryption failure.
-- Manual fallback: type `/goanyway` in the affected conversation.
-- Slash menu: select `/prompts:goanyway`, then submit it.
+There is no command to run. Recovery starts automatically after a recognized decryption failure.
 
-The `prompts:` prefix is hard-coded by the current Codex Desktop custom prompt UI. Getting an exact `/goanyway` menu label would require patching the signed frontend bundle, which this project deliberately avoids.
+Versions before `0.2.0` included a manual `/goanyway` fallback. The installer now removes that legacy menu entry, and `/goanyway` is forwarded as ordinary user input.
 
 ## Update
 
@@ -66,7 +62,7 @@ Then fully quit and reopen Codex Desktop.
 ./test/install.test.sh
 ```
 
-The installer also runs automatic and manual recovery tests. Tests use a mock Codex process and do not touch real conversations.
+The installer runs the automatic recovery test and verifies that the removed `/goanyway` command is passed through normally. Tests use a mock Codex process and do not touch real conversations.
 
 ## Uninstall
 
@@ -87,7 +83,7 @@ Then fully quit and reopen Codex Desktop.
 ## Privacy and safety
 
 - Do not publish or copy your entire `~/.codex` directory. It may contain account credentials and conversation data.
-- Only this repository and `~/.codex/prompts/goanyway.md` are needed.
+- Only this repository is needed.
 - Common token formats are redacted before visible history is injected or errors are logged.
 - Prior images and audio are replaced with omission markers during recovery.
 - Proxy logs are local at `~/.codex/safe-switch-proxy/logs/proxy.log` and are excluded from Git.
@@ -97,7 +93,7 @@ Then fully quit and reopen Codex Desktop.
 1. Codex Desktop launches the `codex` wrapper through `CODEX_CLI_PATH`.
 2. The wrapper starts `proxy.mjs` using the Node.js runtime bundled with Codex Desktop.
 3. The proxy launches the real bundled Codex CLI and forwards newline-delimited JSON-RPC traffic.
-4. On a matching failure—or `/goanyway`—the proxy calls `thread/read`, `thread/start`, `thread/inject_items`, `thread/name/set`, and `turn/start`.
+4. On a matching failure, the proxy calls `thread/read`, `thread/start`, `thread/inject_items`, `thread/name/set`, and `turn/start`.
 
 This project is unofficial and is not supported by OpenAI.
 

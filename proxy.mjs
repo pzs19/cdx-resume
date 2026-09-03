@@ -87,10 +87,6 @@ function startProxy() {
     child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
-  function writeToClient(message) {
-    process.stdout.write(`${JSON.stringify(message)}\n`);
-  }
-
   function internalRequest(method, params, timeoutMs = 30_000) {
     const id = `safe-switch:${instanceId}:${++internalRequestSequence}`;
     return new Promise((resolve, reject) => {
@@ -107,10 +103,6 @@ function startProxy() {
   function handleClientMessage(message) {
     if (message == null || typeof message !== "object") return false;
     if (message.method === "turn/start" && message.params?.threadId) {
-      if (isGoAnywayCommand(message.params.input)) {
-        handleGoAnyway(message);
-        return true;
-      }
       const record = {
         params: structuredClone(message.params),
         requestKey: message.id == null ? null : idKey(message.id),
@@ -136,68 +128,6 @@ function startProxy() {
       consumed = handleClientMessage(JSON.parse(line));
     } catch {}
     if (!consumed && !child.stdin.destroyed) child.stdin.write(`${line}\n`);
-  }
-
-  function handleGoAnyway(message) {
-    const sourceThreadId = message.params.threadId;
-    const previousTurn = latestTurnByThread.get(sourceThreadId);
-    const sourceTurn = buildManualSourceTurn(message.params, previousTurn);
-    const commandTurnId = crypto.randomUUID();
-    const startedAt = Math.floor(Date.now() / 1000);
-    const inProgressTurn = {
-      id: commandTurnId,
-      items: [],
-      startedAt,
-      status: "inProgress",
-    };
-
-    if (message.id != null) {
-      writeToClient({ id: message.id, result: { turn: inProgressTurn } });
-    }
-
-    setImmediate(() => {
-      beginRecovery({
-        failedTurnId: previousTurn?.turnId || null,
-        fallbackTurnParams: message.params,
-        navigate: false,
-        sourceThreadId,
-        sourceTurn,
-        trigger: "manual",
-      })
-        .then(({ newThreadId }) => {
-          writeToClient({
-            method: "turn/completed",
-            params: {
-              threadId: sourceThreadId,
-              turn: {
-                ...inProgressTurn,
-                completedAt: Math.floor(Date.now() / 1000),
-                durationMs: Date.now() - startedAt * 1000,
-                status: "completed",
-              },
-            },
-          });
-          openRecoveredThread(newThreadId);
-        })
-        .catch((error) => {
-          const reason = safeErrorMessage(error);
-          log("manual_recovery_failed", { sourceThreadId, reason });
-          writeToClient({
-            method: "turn/completed",
-            params: {
-              threadId: sourceThreadId,
-              turn: {
-                ...inProgressTurn,
-                completedAt: Math.floor(Date.now() / 1000),
-                durationMs: Date.now() - startedAt * 1000,
-                error: { message: `Manual /goanyway recovery failed: ${reason}` },
-                status: "failed",
-              },
-            },
-          });
-          notifyFailure();
-        });
-    });
   }
 
   function handleServerMessage(message) {
@@ -247,7 +177,6 @@ function startProxy() {
               failedTurnId: turn.id,
               sourceThreadId: threadId,
               sourceTurn,
-              trigger: "automatic",
             }).catch((error) => {
               log("recovery_failed", {
                 sourceThreadId: threadId,
@@ -285,13 +214,10 @@ function startProxy() {
 
   async function recoverThread({
     failedTurnId,
-    fallbackTurnParams,
-    navigate = true,
     sourceThreadId,
     sourceTurn,
-    trigger = "automatic",
   }) {
-    log("recovery_started", { failedTurnId, sourceThreadId, trigger });
+    log("recovery_started", { failedTurnId, sourceThreadId });
     const readResult = await internalRequest("thread/read", {
       includeTurns: true,
       threadId: sourceThreadId,
@@ -303,7 +229,6 @@ function startProxy() {
 
     const replay = resolveReplayTurn({
       failedTurnId,
-      fallbackTurnParams,
       sourceThread,
       sourceTurn,
     });
@@ -347,33 +272,29 @@ function startProxy() {
       replay.params,
       sourceThreadId,
       newThreadId,
-      trigger,
     );
     await internalRequest("turn/start", recoveredTurnParams, 60_000);
-    if (navigate) openRecoveredThread(newThreadId);
+    openRecoveredThread(newThreadId);
     log("recovery_succeeded", {
       copiedVisibleItems: visibleItems.length,
       failedTurnId: replay.omittedTurnId,
       newThreadId,
       sourceThreadId,
-      trigger,
     });
     return { newThreadId };
   }
 
-  function buildRecoveredTurnParams(original, sourceThreadId, newThreadId, trigger) {
+  function buildRecoveredTurnParams(original, sourceThreadId, newThreadId) {
     const recovered = structuredClone(original);
     recovered.threadId = newThreadId;
     delete recovered.clientUserMessageId;
-    recovered.turnTrigger =
-      trigger === "manual" ? "safe-switch-manual-recovery" : "safe-switch-auto-recovery";
+    recovered.turnTrigger = "safe-switch-auto-recovery";
     recovered.additionalContext = {
       ...(recovered.additionalContext || {}),
       safe_switch_auto_recovery: {
         kind: "application",
         value:
-          `This task was ${trigger === "manual" ? "manually" : "automatically"} recovered ` +
-          `from Codex thread ${sourceThreadId} ` +
+          `This task was automatically recovered from Codex thread ${sourceThreadId} ` +
           "after account-bound encrypted history could not be decrypted. Visible prior user and " +
           "assistant messages were copied into this fresh thread; hidden reasoning and tool state " +
           "were intentionally omitted. Continue the current user request normally. Do not repeat " +
@@ -383,19 +304,9 @@ function startProxy() {
     return recovered;
   }
 
-  function buildManualSourceTurn(commandParams, previousTurn) {
-    const params = structuredClone(commandParams);
-    const previousInput = copyReplayInput(previousTurn?.params?.input);
-    params.input = previousInput.length > 0 ? previousInput : [];
-    return {
-      params,
-      turnId: previousTurn?.turnId || null,
-    };
-  }
-
-  function resolveReplayTurn({ failedTurnId, fallbackTurnParams, sourceThread, sourceTurn }) {
+  function resolveReplayTurn({ failedTurnId, sourceThread, sourceTurn }) {
     const candidate = findLastReplayableTurn(sourceThread.turns || []);
-    const params = structuredClone(sourceTurn?.params || fallbackTurnParams || {});
+    const params = structuredClone(sourceTurn?.params || {});
     let input = copyReplayInput(params.input);
 
     if (input.length === 0 && candidate) input = candidate.input;
@@ -434,7 +345,6 @@ function startProxy() {
     for (const part of input) {
       if (part?.type === "text") {
         if (typeof part.text !== "string" || isSyntheticUserText(part.text)) continue;
-        if (isGoAnywayText(part.text)) continue;
         copied.push(structuredClone(part));
       } else if (
         part?.type === "image" ||
@@ -570,27 +480,6 @@ function isEncryptedContentFailure(error) {
     text = String(error);
   }
   return /encrypted[_ -]?content|could not be decrypted|failed to decrypt/i.test(text);
-}
-
-function isGoAnywayCommand(input) {
-  if (!Array.isArray(input)) return false;
-  const textParts = [];
-  for (const part of input) {
-    if (part?.type !== "text") return false;
-    if (typeof part.text !== "string" || isSyntheticUserText(part.text)) continue;
-    textParts.push(part.text);
-  }
-  return isGoAnywayText(textParts.join("\n"));
-}
-
-function isGoAnywayText(text) {
-  if (typeof text !== "string") return false;
-  const normalized = text.trim().toLowerCase();
-  return (
-    normalized === "/goanyway" ||
-    normalized === "/prompts:goanyway" ||
-    normalized === "__codex_goanyway_recovery__"
-  );
 }
 
 function isSyntheticUserText(text) {

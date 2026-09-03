@@ -4,7 +4,7 @@ set -eu
 repo_dir=${0:A:h}
 codex_home="$HOME/.codex"
 install_dir="$codex_home/safe-switch-proxy"
-prompt_dir="$codex_home/prompts"
+legacy_prompt="$codex_home/prompts/goanyway.md"
 profile_path="$HOME/.zprofile"
 launch_agent="$HOME/Library/LaunchAgents/com.pzs19.cdx-resume.plist"
 resources_dir=${CODEX_ELECTRON_RESOURCES_PATH:-/Applications/ChatGPT.app/Contents/Resources}
@@ -24,7 +24,7 @@ if [[ -z "$node_bin" ]]; then
   exit 1
 fi
 
-mkdir -p "$install_dir/test" "$install_dir/logs" "$prompt_dir"
+mkdir -p "$install_dir/test" "$install_dir/logs"
 
 if [[ "$repo_dir" != "$install_dir" ]]; then
   install -m 755 "$repo_dir/codex" "$install_dir/codex"
@@ -33,13 +33,16 @@ if [[ "$repo_dir" != "$install_dir" ]]; then
   install -m 755 "$repo_dir/uninstall.sh" "$install_dir/uninstall.sh"
   install -m 700 "$repo_dir/test/mock-codex.mjs" "$install_dir/test/mock-codex.mjs"
   install -m 700 "$repo_dir/test/recovery.test.mjs" "$install_dir/test/recovery.test.mjs"
-  install -m 700 "$repo_dir/test/goanyway.test.mjs" "$install_dir/test/goanyway.test.mjs"
+  install -m 700 "$repo_dir/test/passthrough.test.mjs" "$install_dir/test/passthrough.test.mjs"
 fi
 
 chmod 755 "$install_dir/codex" "$install_dir/proxy.mjs"
 chmod 700 "$install_dir/test/"*.mjs
 chmod 700 "$install_dir/logs"
-install -m 644 "$repo_dir/prompts/goanyway.md" "$prompt_dir/goanyway.md"
+rm -f "$install_dir/test/goanyway.test.mjs"
+if [[ -f "$legacy_prompt" ]] && grep -Fq '__CODEX_GOANYWAY_RECOVERY__' "$legacy_prompt"; then
+  rm "$legacy_prompt"
+fi
 
 touch "$profile_path"
 if ! grep -Eq '^[[:space:]]*export CODEX_CLI_PATH=.*safe-switch-proxy/codex' "$profile_path"; then
@@ -70,11 +73,9 @@ if [[ "${CDX_RESUME_SKIP_LAUNCHCTL:-0}" != "1" ]]; then
 fi
 
 "$node_bin" "$install_dir/test/recovery.test.mjs"
-"$node_bin" "$install_dir/test/goanyway.test.mjs"
-GOANYWAY_TEST_COMMAND='/prompts:goanyway' \
-  "$node_bin" "$install_dir/test/goanyway.test.mjs"
+"$node_bin" "$install_dir/test/passthrough.test.mjs"
 
 print ''
 print 'cdx-resume installed successfully.'
 print 'Fully quit Codex Desktop with Cmd+Q, then reopen it.'
-print 'Use /goanyway directly, or select /prompts:goanyway from the slash menu.'
+print 'Recovery will run automatically after a recognized encrypted-content failure.'
