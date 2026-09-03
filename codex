@@ -1,0 +1,12 @@
+#!/bin/zsh
+set -eu
+
+proxy_dir=${0:A:h}
+resources_dir=${CODEX_ELECTRON_RESOURCES_PATH:-/Applications/ChatGPT.app/Contents/Resources}
+node_bin="$resources_dir/cua_node/bin/node"
+
+if [[ ! -x "$node_bin" ]]; then
+  node_bin=$(command -v node)
+fi
+
+exec "$node_bin" "$proxy_dir/proxy.mjs" "$@"
