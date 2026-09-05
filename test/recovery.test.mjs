@@ -49,13 +49,21 @@ send({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
 send({
   jsonrpc: "2.0",
   id: 2,
+  method: "thread/resume",
+  params: {
+    threadId: "source-thread",
+  },
+});
+send({
+  jsonrpc: "2.0",
+  id: 3,
   method: "turn/start",
   params: {
     clientUserMessageId: "client-message-1",
     input: [{ type: "text", text: "retry me" }],
     model: "gpt-test",
     personality: "friendly",
-    runtimeWorkspaceRoots: ["/tmp/source-project"],
+    environments: [{ cwd: "/tmp/source-project", id: "local" }],
     serviceTier: "fast",
     threadId: "source-thread",
   },
@@ -101,6 +109,17 @@ assert.equal(threadStart.params.model, "gpt-test");
 assert.equal(threadStart.params.modelProvider, "openai");
 assert.equal(threadStart.params.projectId, "project-1");
 assert.equal(threadStart.params.threadSource, "appServer");
+assert.equal(threadStart.params.permissions, ":danger-full-access");
+assert.equal(threadStart.params.approvalPolicy, "never");
+assert.equal(threadStart.params.approvalsReviewer, "user");
+assert.deepEqual(threadStart.params.runtimeWorkspaceRoots, [
+  "/tmp/source-project",
+  "/tmp/visualizations",
+]);
+assert.deepEqual(threadStart.params.environments, [
+  { cwd: "/tmp/source-project", id: "local" },
+]);
+assert.equal("sandbox" in threadStart.params, false);
 
 const injection = internal.find((message) => message.method === "thread/inject_items");
 assert.deepEqual(injection.params.items, [
@@ -130,6 +149,10 @@ assert.equal(recoveredTurn.params.threadId, "recovered-thread");
 assert.deepEqual(recoveredTurn.params.input, [{ type: "text", text: "retry me" }]);
 assert.equal("clientUserMessageId" in recoveredTurn.params, false);
 assert.equal(recoveredTurn.params.turnTrigger, "safe-switch-auto-recovery");
+assert.equal(recoveredTurn.params.permissions, ":danger-full-access");
+assert.equal(recoveredTurn.params.approvalPolicy, "never");
+assert.equal(recoveredTurn.params.approvalsReviewer, "user");
+assert.equal("sandboxPolicy" in recoveredTurn.params, false);
 assert.match(
   recoveredTurn.params.additionalContext.safe_switch_auto_recovery.value,
   /Visible prior user and assistant messages were copied/,
@@ -137,7 +160,7 @@ assert.match(
 
 assert.deepEqual(
   stdout.filter((message) => message.id != null).map((message) => message.id),
-  [1, 2],
+  [1, 2, 3],
 );
 assert.equal(
   stdout.some(

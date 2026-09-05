@@ -53,12 +53,21 @@ function startProxy() {
   const internalRequests = new Map();
   const clientRequests = new Map();
   const latestTurnByThread = new Map();
+  const threadSettingsById = new Map();
   const attemptedRecoveries = new Set();
   const recoveryThreads = new Set();
   const activeRecoveries = new Map();
 
   const logDirectory = path.join(os.homedir(), ".codex", "safe-switch-proxy", "logs");
   const logPath = path.join(logDirectory, "proxy.log");
+  const pendingRepairPath = path.join(
+    os.homedir(),
+    ".codex",
+    "safe-switch-proxy",
+    "state",
+    "pending-thread-repairs.json",
+  );
+  const pendingThreadRepairs = loadPendingThreadRepairs(pendingRepairPath);
   fs.mkdirSync(logDirectory, { recursive: true, mode: 0o700 });
   try {
     fs.chmodSync(logDirectory, 0o700);
@@ -103,6 +112,17 @@ function startProxy() {
   function handleClientMessage(message) {
     if (message == null || typeof message !== "object") return false;
     if (message.method === "turn/start" && message.params?.threadId) {
+      const pendingRepair = pendingThreadRepairs.get(message.params.threadId);
+      if (pendingRepair) {
+        copyDefinedFields(message.params, pendingRepair, [
+          "approvalPolicy",
+          "approvalsReviewer",
+        ]);
+        applyPermissionToTurn(message.params, pendingRepair);
+        pendingThreadRepairs.delete(message.params.threadId);
+        persistPendingThreadRepairs(pendingRepairPath, pendingThreadRepairs);
+        log("pending_settings_repair_applied", { threadId: message.params.threadId });
+      }
       const record = {
         params: structuredClone(message.params),
         requestKey: message.id == null ? null : idKey(message.id),
@@ -111,12 +131,19 @@ function startProxy() {
       };
       latestTurnByThread.set(message.params.threadId, record);
       if (record.requestKey != null) {
-        clientRequests.set(record.requestKey, { method: message.method, record });
+        clientRequests.set(record.requestKey, {
+          method: message.method,
+          params: structuredClone(message.params),
+          record,
+        });
       }
       return false;
     }
     if (message.id != null && message.method) {
-      clientRequests.set(idKey(message.id), { method: message.method });
+      clientRequests.set(idKey(message.id), {
+        method: message.method,
+        params: structuredClone(message.params || {}),
+      });
     }
     return false;
   }
@@ -124,10 +151,13 @@ function startProxy() {
   function handleClientLine(line) {
     if (!line.trim()) return;
     let consumed = false;
+    let forwardedLine = line;
     try {
-      consumed = handleClientMessage(JSON.parse(line));
+      const message = JSON.parse(line);
+      consumed = handleClientMessage(message);
+      forwardedLine = JSON.stringify(message);
     } catch {}
-    if (!consumed && !child.stdin.destroyed) child.stdin.write(`${line}\n`);
+    if (!consumed && !child.stdin.destroyed) child.stdin.write(`${forwardedLine}\n`);
   }
 
   function handleServerMessage(message) {
@@ -154,9 +184,19 @@ function startProxy() {
       const client = clientRequests.get(key);
       if (client != null) {
         clientRequests.delete(key);
-        if (client.method === "turn/start" && client.record && message.result?.turn?.id) {
-          client.record.turnId = message.result.turn.id;
+        if (message.error == null) {
+          captureClientResponse(client, message.result);
+          if (client.method === "turn/start" && client.record && message.result?.turn?.id) {
+            client.record.turnId = message.result.turn.id;
+          }
         }
+      }
+    }
+
+    if (message.method === "thread/settings/updated") {
+      const { threadId, threadSettings } = message.params || {};
+      if (typeof threadId === "string" && threadSettings) {
+        mergeThreadSettings(threadId, settingsFromResolvedState(threadSettings));
       }
     }
 
@@ -189,6 +229,35 @@ function startProxy() {
       }
     }
     return false;
+  }
+
+  function captureClientResponse(client, result) {
+    const params = client.params || {};
+    if (client.method === "thread/start" || client.method === "thread/resume") {
+      const threadId = result?.thread?.id || params.threadId;
+      if (typeof threadId !== "string") return;
+      const requestSettings = settingsFromThreadRequest(params);
+      const resolvedSettings = settingsFromResolvedState(result || {});
+      mergeThreadSettings(threadId, mergeDefined(requestSettings, resolvedSettings));
+      return;
+    }
+
+    if (client.method === "thread/settings/update" && typeof params.threadId === "string") {
+      mergeThreadSettings(params.threadId, settingsFromTurnRequest(params));
+      return;
+    }
+
+    if (client.method === "turn/start" && typeof params.threadId === "string") {
+      mergeThreadSettings(params.threadId, settingsFromTurnRequest(params));
+    }
+  }
+
+  function mergeThreadSettings(threadId, update) {
+    if (!update || Object.keys(update).length === 0) return;
+    threadSettingsById.set(
+      threadId,
+      mergeDefined(threadSettingsById.get(threadId) || {}, update),
+    );
   }
 
   function handleServerLine(line) {
@@ -232,22 +301,21 @@ function startProxy() {
       sourceThread,
       sourceTurn,
     });
+    const sourceSettings = resolveSourceSettings(sourceThread, replay.params);
     const visibleItems = buildVisibleHistory(sourceThread.turns || [], replay.omittedTurnId);
-    const newThreadResult = await internalRequest("thread/start", {
-      cwd: sourceThread.cwd,
-      ephemeral: false,
-      historyMode: sourceThread.historyMode || null,
-      model: replay.params.model || null,
-      modelProvider: sourceThread.modelProvider || null,
-      personality: replay.params.personality || null,
-      projectId: sourceThread.projectId || null,
-      runtimeWorkspaceRoots: replay.params.runtimeWorkspaceRoots || null,
-      serviceTier: replay.params.serviceTier || null,
-      threadSource: sourceThread.threadSource || null,
-    });
+    const newThreadParams = buildRecoveredThreadStartParams(
+      sourceThread,
+      replay.params,
+      sourceSettings,
+    );
+    const newThreadResult = await internalRequest("thread/start", newThreadParams);
     const newThreadId = newThreadResult?.thread?.id;
     if (!newThreadId) throw new Error("thread/start did not return a new thread ID");
     recoveryThreads.add(newThreadId);
+    mergeThreadSettings(
+      newThreadId,
+      mergeDefined(sourceSettings, settingsFromResolvedState(newThreadResult || {})),
+    );
 
     if (visibleItems.length > 0) {
       await internalRequest("thread/inject_items", {
@@ -272,6 +340,7 @@ function startProxy() {
       replay.params,
       sourceThreadId,
       newThreadId,
+      sourceSettings,
     );
     await internalRequest("turn/start", recoveredTurnParams, 60_000);
     openRecoveredThread(newThreadId);
@@ -284,10 +353,57 @@ function startProxy() {
     return { newThreadId };
   }
 
-  function buildRecoveredTurnParams(original, sourceThreadId, newThreadId) {
+  function resolveSourceSettings(sourceThread, replayParams) {
+    const observed = threadSettingsById.get(sourceThread.id) || {};
+    const persisted = readPersistedTurnSettings(sourceThread.path);
+    const explicit = settingsFromTurnRequest(replayParams);
+    return mergeDefined(persisted, observed, explicit);
+  }
+
+  function buildRecoveredThreadStartParams(sourceThread, replayParams, sourceSettings) {
+    const params = {
+      cwd: sourceSettings.cwd || sourceThread.cwd,
+      ephemeral: false,
+      historyMode: sourceThread.historyMode || null,
+      model: sourceSettings.model || replayParams.model || null,
+      modelProvider: sourceThread.modelProvider || null,
+      personality: sourceSettings.personality || replayParams.personality || null,
+      projectId: sourceThread.projectId || null,
+      runtimeWorkspaceRoots:
+        sourceSettings.runtimeWorkspaceRoots || replayParams.runtimeWorkspaceRoots || null,
+      serviceTier: sourceSettings.serviceTier || replayParams.serviceTier || null,
+      threadSource: sourceThread.threadSource || null,
+    };
+
+    copyDefinedFields(params, sourceSettings, [
+      "approvalPolicy",
+      "approvalsReviewer",
+      "dynamicTools",
+      "environments",
+      "selectedCapabilityRoots",
+    ]);
+    applyPermissionToThreadStart(params, sourceSettings);
+    return params;
+  }
+
+  function buildRecoveredTurnParams(original, sourceThreadId, newThreadId, sourceSettings) {
     const recovered = structuredClone(original);
     recovered.threadId = newThreadId;
     delete recovered.clientUserMessageId;
+    copyDefinedFields(recovered, sourceSettings, [
+      "approvalPolicy",
+      "approvalsReviewer",
+      "collaborationMode",
+      "cwd",
+      "effort",
+      "environments",
+      "model",
+      "personality",
+      "runtimeWorkspaceRoots",
+      "serviceTier",
+      "summary",
+    ]);
+    applyPermissionToTurn(recovered, sourceSettings);
     recovered.turnTrigger = "safe-switch-auto-recovery";
     recovered.additionalContext = {
       ...(recovered.additionalContext || {}),
@@ -480,6 +596,214 @@ function isEncryptedContentFailure(error) {
     text = String(error);
   }
   return /encrypted[_ -]?content|could not be decrypted|failed to decrypt/i.test(text);
+}
+
+function settingsFromThreadRequest(params) {
+  if (!params || typeof params !== "object") return {};
+  const settings = settingsFromTurnRequest(params);
+  copyDefinedFields(settings, params, [
+    "dynamicTools",
+    "selectedCapabilityRoots",
+  ]);
+  if (params.sandbox != null) settings.sandboxMode = params.sandbox;
+  return settings;
+}
+
+function settingsFromTurnRequest(params) {
+  if (!params || typeof params !== "object") return {};
+  const settings = {};
+  copyDefinedFields(settings, params, [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "collaborationMode",
+    "cwd",
+    "effort",
+    "environments",
+    "model",
+    "personality",
+    "runtimeWorkspaceRoots",
+    "sandboxPolicy",
+    "serviceTier",
+    "summary",
+  ]);
+  if (typeof params.permissions === "string" && params.permissions) {
+    settings.permissionId = params.permissions;
+  }
+  return settings;
+}
+
+function settingsFromResolvedState(state) {
+  if (!state || typeof state !== "object") return {};
+  const settings = {};
+  copyDefinedFields(settings, state, [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "collaborationMode",
+    "cwd",
+    "effort",
+    "model",
+    "personality",
+    "runtimeWorkspaceRoots",
+    "serviceTier",
+    "summary",
+  ]);
+  if (settings.effort == null && state.reasoningEffort != null) {
+    settings.effort = structuredClone(state.reasoningEffort);
+  }
+  if (state.activePermissionProfile?.id) {
+    settings.permissionId = state.activePermissionProfile.id;
+  }
+  if (state.sandboxPolicy != null) {
+    settings.sandboxPolicy = structuredClone(state.sandboxPolicy);
+  } else if (state.sandbox != null && typeof state.sandbox === "object") {
+    settings.sandboxPolicy = structuredClone(state.sandbox);
+  }
+  return settings;
+}
+
+function settingsFromPersistedTurnContext(context) {
+  if (!context || typeof context !== "object") return {};
+  const settings = {};
+  const activeProfile = context.active_permission_profile;
+  if (activeProfile?.id) settings.permissionId = activeProfile.id;
+  const pairs = [
+    ["approval_policy", "approvalPolicy"],
+    ["approvals_reviewer", "approvalsReviewer"],
+    ["collaboration_mode", "collaborationMode"],
+    ["cwd", "cwd"],
+    ["effort", "effort"],
+    ["model", "model"],
+    ["personality", "personality"],
+    ["sandbox_policy", "sandboxPolicy"],
+    ["summary", "summary"],
+    ["workspace_roots", "runtimeWorkspaceRoots"],
+  ];
+  for (const [source, target] of pairs) {
+    if (context[source] != null) settings[target] = structuredClone(context[source]);
+  }
+  return settings;
+}
+
+function readPersistedTurnSettings(sessionPath) {
+  if (typeof sessionPath !== "string" || !path.isAbsolute(sessionPath)) return {};
+  let descriptor;
+  try {
+    const stat = fs.statSync(sessionPath);
+    if (!stat.isFile() || stat.size === 0) return {};
+    descriptor = fs.openSync(sessionPath, "r");
+    const maxBytes = Math.min(stat.size, 32 * 1024 * 1024);
+    const buffer = Buffer.allocUnsafe(maxBytes);
+    fs.readSync(descriptor, buffer, 0, maxBytes, stat.size - maxBytes);
+    const lines = buffer.toString("utf8").split("\n");
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index].trim();
+      if (!line || !line.includes('"type":"turn_context"')) continue;
+      try {
+        const record = JSON.parse(line);
+        if (record?.type === "turn_context") {
+          return settingsFromPersistedTurnContext(record.payload);
+        }
+      } catch {}
+    }
+  } catch {
+    return {};
+  } finally {
+    if (descriptor != null) {
+      try {
+        fs.closeSync(descriptor);
+      } catch {}
+    }
+  }
+  return {};
+}
+
+function mergeDefined(...sources) {
+  const merged = {};
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    for (const [key, value] of Object.entries(source)) {
+      if (value != null) merged[key] = structuredClone(value);
+    }
+  }
+  return merged;
+}
+
+function copyDefinedFields(target, source, fields) {
+  for (const field of fields) {
+    if (source?.[field] != null) target[field] = structuredClone(source[field]);
+  }
+}
+
+function applyPermissionToThreadStart(params, settings) {
+  if (settings.permissionId) {
+    params.permissions = settings.permissionId;
+    delete params.sandbox;
+    return;
+  }
+  const sandboxMode = settings.sandboxMode || sandboxPolicyToMode(settings.sandboxPolicy);
+  if (sandboxMode) params.sandbox = sandboxMode;
+}
+
+function applyPermissionToTurn(params, settings) {
+  if (settings.permissionId) {
+    params.permissions = settings.permissionId;
+    delete params.sandboxPolicy;
+    return;
+  }
+  if (settings.sandboxPolicy != null) {
+    params.sandboxPolicy = structuredClone(settings.sandboxPolicy);
+    delete params.permissions;
+  }
+}
+
+function sandboxPolicyToMode(policy) {
+  if (typeof policy === "string") return policy;
+  switch (policy?.type) {
+    case "dangerFullAccess":
+    case "danger-full-access":
+      return "danger-full-access";
+    case "workspaceWrite":
+    case "workspace-write":
+      return "workspace-write";
+    case "readOnly":
+    case "read-only":
+      return "read-only";
+    default:
+      return null;
+  }
+}
+
+function loadPendingThreadRepairs(filePath) {
+  const repairs = new Map();
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    for (const [threadId, value] of Object.entries(parsed)) {
+      if (!threadId || !value || typeof value !== "object") continue;
+      const repair = {};
+      if (typeof value.permissionId === "string" && value.permissionId) {
+        repair.permissionId = value.permissionId;
+      }
+      copyDefinedFields(repair, value, [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "sandboxPolicy",
+      ]);
+      if (Object.keys(repair).length > 0) repairs.set(threadId, repair);
+    }
+  } catch {}
+  return repairs;
+}
+
+function persistPendingThreadRepairs(filePath, repairs) {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+    const serialized = Object.fromEntries(repairs);
+    fs.writeFileSync(filePath, `${JSON.stringify(serialized, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    fs.chmodSync(filePath, 0o600);
+  } catch {}
 }
 
 function isSyntheticUserText(text) {

@@ -35,6 +35,7 @@ lines.on("line", (line) => {
           historyMode: "legacy",
           modelProvider: "openai",
           name: "Original task",
+          path: process.env.SAFE_SWITCH_TEST_SOURCE_PATH || null,
           projectId: "project-1",
           threadSource: "appServer",
           turns: [
@@ -63,6 +64,27 @@ lines.on("line", (line) => {
             },
           ],
         },
+      },
+    });
+    return;
+  }
+
+  if (message.method === "thread/resume") {
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        activePermissionProfile: { id: ":danger-full-access" },
+        approvalPolicy: "never",
+        approvalsReviewer: "user",
+        cwd: "/tmp/source-project",
+        model: "gpt-test",
+        modelProvider: "openai",
+        reasoningEffort: "high",
+        runtimeWorkspaceRoots: ["/tmp/source-project", "/tmp/visualizations"],
+        sandbox: { type: "dangerFullAccess" },
+        serviceTier: "fast",
+        thread: { id: "source-thread", turns: [] },
       },
     });
     return;

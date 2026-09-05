@@ -33,6 +33,7 @@ if [[ "$repo_dir" != "$install_dir" ]]; then
   install -m 755 "$repo_dir/uninstall.sh" "$install_dir/uninstall.sh"
   install -m 700 "$repo_dir/test/mock-codex.mjs" "$install_dir/test/mock-codex.mjs"
   install -m 700 "$repo_dir/test/recovery.test.mjs" "$install_dir/test/recovery.test.mjs"
+  install -m 700 "$repo_dir/test/persisted-settings.test.mjs" "$install_dir/test/persisted-settings.test.mjs"
   install -m 700 "$repo_dir/test/passthrough.test.mjs" "$install_dir/test/passthrough.test.mjs"
 fi
 
@@ -73,6 +74,7 @@ if [[ "${CDX_RESUME_SKIP_LAUNCHCTL:-0}" != "1" ]]; then
 fi
 
 "$node_bin" "$install_dir/test/recovery.test.mjs"
+"$node_bin" "$install_dir/test/persisted-settings.test.mjs"
 "$node_bin" "$install_dir/test/passthrough.test.mjs"
 
 print ''

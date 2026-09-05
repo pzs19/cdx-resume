@@ -12,6 +12,24 @@ const proxy = path.join(root, "proxy.mjs");
 const mock = path.join(import.meta.dirname, "mock-codex.mjs");
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "passthrough-test-"));
 const tracePath = path.join(tempHome, "trace.jsonl");
+const repairPath = path.join(
+  tempHome,
+  ".codex",
+  "safe-switch-proxy",
+  "state",
+  "pending-thread-repairs.json",
+);
+fs.mkdirSync(path.dirname(repairPath), { recursive: true });
+fs.writeFileSync(
+  repairPath,
+  `${JSON.stringify({
+    "source-thread": {
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      permissionId: ":danger-full-access",
+    },
+  })}\n`,
+);
 
 const child = spawn(process.execPath, [proxy, "app-server"], {
   env: {
@@ -76,6 +94,14 @@ assert.equal(
   ),
   true,
 );
+const forwardedTurn = trace.find(
+  (message) =>
+    message.method === "turn/start" &&
+    message.params?.input?.some((part) => part?.text === "/goanyway"),
+);
+assert.equal(forwardedTurn.params.permissions, ":danger-full-access");
+assert.equal(forwardedTurn.params.approvalPolicy, "never");
+assert.equal(JSON.parse(fs.readFileSync(repairPath, "utf8"))["source-thread"], undefined);
 assert.equal(
   trace.some(
     (message) => typeof message.id === "string" && message.id.startsWith("safe-switch:"),

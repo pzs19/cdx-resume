@@ -13,6 +13,10 @@ It does **not** modify `app.asar` or replace the signed application bundle. Inst
 - Copies visible user and assistant messages into the fresh thread.
 - Intentionally drops encrypted content, hidden reasoning, and tool execution state.
 - Replays the latest user request and opens the recovered thread.
+- Preserves the source thread's resolved permission profile, approval policy, workspace roots,
+  environments, and capability configuration when available.
+- Falls back to the latest persisted `turn_context` when the source thread was loaded before the
+  proxy could observe its runtime settings.
 
 The original thread is kept unchanged.
 
@@ -36,15 +40,14 @@ cd ~/.codex/safe-switch-proxy
 ./install.sh
 ```
 
-Fully quit Codex Desktop with `Cmd+Q`, then reopen it so the app starts the proxy.
+Fully quit Codex Desktop with `Cmd+Q`, then reopen it. Closing only the window does not restart the
+app-server process.
 
 The installer also creates a per-user LaunchAgent so `CODEX_CLI_PATH` is restored after login or reboot.
 
 ## Usage
 
-There is no command to run. Recovery starts automatically after a recognized decryption failure.
-
-Versions before `0.2.0` included a manual `/goanyway` fallback. The installer now removes that legacy menu entry, and `/goanyway` is forwarded as ordinary user input.
+No command is required. Recovery starts automatically after a recognized decryption failure.
 
 ## Update
 
@@ -62,7 +65,8 @@ Then fully quit and reopen Codex Desktop.
 ./test/install.test.sh
 ```
 
-The installer runs the automatic recovery test and verifies that the removed `/goanyway` command is passed through normally. Tests use a mock Codex process and do not touch real conversations.
+The installer runs recovery, permission-preservation, removed-command pass-through, and lifecycle
+tests. Tests use a mock Codex process and do not touch real conversations.
 
 ## Uninstall
 
@@ -93,7 +97,11 @@ Then fully quit and reopen Codex Desktop.
 1. Codex Desktop launches the `codex` wrapper through `CODEX_CLI_PATH`.
 2. The wrapper starts `proxy.mjs` using the Node.js runtime bundled with Codex Desktop.
 3. The proxy launches the real bundled Codex CLI and forwards newline-delimited JSON-RPC traffic.
-4. On a matching failure, the proxy calls `thread/read`, `thread/start`, `thread/inject_items`, `thread/name/set`, and `turn/start`.
+4. It captures resolved thread settings from `thread/start`, `thread/resume`, and
+   `thread/settings/updated`; the persisted `turn_context` is used as a cold-start fallback.
+5. On a matching failure, the proxy calls `thread/read`, `thread/start`, `thread/inject_items`,
+   `thread/name/set`, and `turn/start`, applying the source permission and capability settings to
+   the fresh thread.
 
 This project is unofficial and is not supported by OpenAI.
 
