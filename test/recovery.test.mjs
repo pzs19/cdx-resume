@@ -100,7 +100,7 @@ const internal = trace.filter(
 
 assert.deepEqual(
   internal.map((message) => message.method),
-  ["thread/read", "thread/start", "thread/inject_items", "thread/name/set", "turn/start"],
+  ["thread/read", "thread/start", "thread/inject_items", "thread/archive", "thread/read", "thread/unarchive", "thread/resume", "thread/name/set", "turn/start"],
 );
 
 const threadStart = internal.find((message) => message.method === "thread/start");
@@ -175,6 +175,11 @@ assert.equal(
 const logPath = path.join(tempHome, ".codex", "safe-switch-proxy", "logs", "proxy.log");
 const log = fs.readFileSync(logPath, "utf8");
 assert.match(log, /"event":"recovery_succeeded"/);
+assert.match(log, /"event":"visible_history_restored"/);
+const visibleRollout = fs.readFileSync(path.join(tempHome, "recovered.jsonl"), "utf8");
+assert.match(visibleRollout, /item_completed/);
+assert.match(visibleRollout, /visible assistant/);
+assert.equal(visibleRollout.includes("hidden"), false);
 if (process.env.SAFE_SWITCH_TEST_STALL_READ === "1") {
   assert.match(log, /"event":"history_read_fallback"/);
   assert.equal(trace.filter(message => message.id === "history-read").length, 1);

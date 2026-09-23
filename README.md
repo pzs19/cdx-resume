@@ -11,7 +11,7 @@ It does **not** modify `app.asar` or replace the signed application bundle. Inst
 - Automatically detects a failed turn whose error mentions `encrypted_content` or decryption failure.
 - Falls back to an independent read-only app-server connection if history reading fails or stalls for 5 seconds; the fallback has a 30-second deadline.
 - Creates a fresh thread using the current account.
-- Copies visible user and assistant messages into the fresh thread.
+- Copies visible user and assistant messages into the fresh thread, including durable UI turns and the paginated history index so older messages can be scrolled into view.
 - Intentionally drops encrypted content, hidden reasoning, and tool execution state.
 - Replays the latest user request and opens the recovered thread.
 - Preserves the source thread's resolved permission profile, approval policy, workspace roots,

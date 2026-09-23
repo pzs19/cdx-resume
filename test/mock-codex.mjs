@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import readline from "node:readline";
+import path from "node:path";
 
 const tracePath = process.env.SAFE_SWITCH_TEST_TRACE;
 if (!tracePath) throw new Error("SAFE_SWITCH_TEST_TRACE is required");
@@ -24,6 +25,10 @@ lines.on("line", (line) => {
     return;
   }
 
+  if (message.method === "thread/read" && message.params.threadId === "recovered-thread") {
+    send({ id: message.id, result: { thread: { id: "recovered-thread", path: path.join(process.env.HOME, "recovered.jsonl") } } });
+    return;
+  }
   if (message.method === "thread/read") {
     if (process.env.SAFE_SWITCH_TEST_STALL_READ === "1" && process.env.SAFE_SWITCH_HISTORY_READER !== "1") return;
     send({
@@ -92,6 +97,7 @@ lines.on("line", (line) => {
   }
 
   if (message.method === "thread/start") {
+    fs.writeFileSync(path.join(process.env.HOME, "recovered.jsonl"), JSON.stringify({type:"session_meta",payload:{id:"recovered-thread"}}) + "\n");
     send({
       jsonrpc: "2.0",
       id: message.id,

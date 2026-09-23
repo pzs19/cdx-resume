@@ -29,10 +29,12 @@ mkdir -p "$install_dir/test" "$install_dir/logs"
 if [[ "$repo_dir" != "$install_dir" ]]; then
   install -m 755 "$repo_dir/codex" "$install_dir/codex"
   install -m 755 "$repo_dir/proxy.mjs" "$install_dir/proxy.mjs"
+  install -m 644 "$repo_dir/history.mjs" "$install_dir/history.mjs"
   install -m 755 "$repo_dir/install.sh" "$install_dir/install.sh"
   install -m 755 "$repo_dir/uninstall.sh" "$install_dir/uninstall.sh"
   install -m 700 "$repo_dir/test/mock-codex.mjs" "$install_dir/test/mock-codex.mjs"
   install -m 700 "$repo_dir/test/recovery.test.mjs" "$install_dir/test/recovery.test.mjs"
+  install -m 700 "$repo_dir/test/history.test.mjs" "$install_dir/test/history.test.mjs"
   install -m 700 "$repo_dir/test/persisted-settings.test.mjs" "$install_dir/test/persisted-settings.test.mjs"
   install -m 700 "$repo_dir/test/passthrough.test.mjs" "$install_dir/test/passthrough.test.mjs"
 fi
@@ -76,6 +78,7 @@ fi
 "$node_bin" "$install_dir/test/recovery.test.mjs"
 SAFE_SWITCH_TEST_STALL_READ=1 SAFE_SWITCH_READ_TIMEOUT_MS=100 "$node_bin" "$install_dir/test/recovery.test.mjs"
 "$node_bin" "$install_dir/test/persisted-settings.test.mjs"
+"$node_bin" "$install_dir/test/history.test.mjs"
 "$node_bin" "$install_dir/test/passthrough.test.mjs"
 
 print ''

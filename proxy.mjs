@@ -335,6 +335,31 @@ function startProxy() {
       });
     }
 
+    if (visibleItems.length > 0) {
+      // Close its writer before replacing durable history. Archive/unarchive
+      // also makes the desktop drop its cached projection of this fresh task.
+      await internalRequest("thread/archive", { threadId: newThreadId });
+      try {
+        const archived = await internalRequest("thread/read", { threadId: newThreadId, includeTurns: false });
+        const { materializeVisibleHistory } = await import("./history.mjs");
+        const result = await materializeVisibleHistory({
+          threadId: newThreadId,
+          rolloutPath: archived.thread.path,
+          codexHome: process.env.CODEX_HOME || path.join(os.homedir(), ".codex"),
+          turns: (sourceThread.turns || []).map(turn => ({
+            id: turn.id,
+            startedAt: turn.startedAt,
+            completedAt: turn.completedAt,
+            messages: buildVisibleHistory([turn], replay.omittedTurnId),
+          })),
+        });
+        log("visible_history_restored", { newThreadId, copiedTurns: result.copiedTurns, copiedItems: result.copiedItems });
+      } finally {
+        await internalRequest("thread/unarchive", { threadId: newThreadId });
+      }
+      await internalRequest("thread/resume", { ...newThreadParams, threadId: newThreadId });
+    }
+
     const sourceName = sourceThread.name?.trim();
     if (sourceName) {
       try {
