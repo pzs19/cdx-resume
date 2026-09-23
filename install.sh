@@ -74,6 +74,7 @@ if [[ "${CDX_RESUME_SKIP_LAUNCHCTL:-0}" != "1" ]]; then
 fi
 
 "$node_bin" "$install_dir/test/recovery.test.mjs"
+SAFE_SWITCH_TEST_STALL_READ=1 SAFE_SWITCH_READ_TIMEOUT_MS=100 "$node_bin" "$install_dir/test/recovery.test.mjs"
 "$node_bin" "$install_dir/test/persisted-settings.test.mjs"
 "$node_bin" "$install_dir/test/passthrough.test.mjs"
 

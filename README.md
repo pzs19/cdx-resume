@@ -9,6 +9,7 @@ It does **not** modify `app.asar` or replace the signed application bundle. Inst
 ## What it does
 
 - Automatically detects a failed turn whose error mentions `encrypted_content` or decryption failure.
+- Falls back to an independent read-only app-server connection if history reading fails or stalls for 5 seconds; the fallback has a 30-second deadline.
 - Creates a fresh thread using the current account.
 - Copies visible user and assistant messages into the fresh thread.
 - Intentionally drops encrypted content, hidden reasoning, and tool execution state.
@@ -19,6 +20,10 @@ It does **not** modify `app.asar` or replace the signed application bundle. Inst
   proxy could observe its runtime settings.
 
 The original thread is kept unchanged.
+
+## Recovery fixes
+
+JSON-RPC framing uses ASCII LF only. Unicode U+2028 and U+2029 in conversation text must remain inside JSON strings; Node readline can otherwise split responses and cause false read timeouts. Regression tests cover both characters and a stalled primary reader.
 
 ## Compatibility
 

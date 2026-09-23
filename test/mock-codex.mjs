@@ -25,6 +25,7 @@ lines.on("line", (line) => {
   }
 
   if (message.method === "thread/read") {
+    if (process.env.SAFE_SWITCH_TEST_STALL_READ === "1" && process.env.SAFE_SWITCH_HISTORY_READER !== "1") return;
     send({
       jsonrpc: "2.0",
       id: message.id,
@@ -51,7 +52,7 @@ lines.on("line", (line) => {
                   ],
                 },
                 { type: "reasoning", summary: ["hidden"], content: "hidden" },
-                { type: "agentMessage", text: "visible assistant" },
+                { type: "agentMessage", text: "visible assistant\u2028line separator\u2029paragraph separator" },
                 { type: "commandExecution", command: "secret tool state" },
               ],
             },

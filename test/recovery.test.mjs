@@ -60,6 +60,7 @@ send({
   method: "turn/start",
   params: {
     clientUserMessageId: "client-message-1",
+    toolOutput: { stale: true },
     input: [{ type: "text", text: "retry me" }],
     model: "gpt-test",
     personality: "friendly",
@@ -134,7 +135,7 @@ assert.deepEqual(injection.params.items, [
   {
     type: "message",
     role: "assistant",
-    content: [{ type: "output_text", text: "visible assistant" }],
+    content: [{ type: "output_text", text: "visible assistant\u2028line separator\u2029paragraph separator" }],
   },
 ]);
 assert.equal(JSON.stringify(injection).includes("hidden"), false);
@@ -148,6 +149,7 @@ const recoveredTurn = internal.find((message) => message.method === "turn/start"
 assert.equal(recoveredTurn.params.threadId, "recovered-thread");
 assert.deepEqual(recoveredTurn.params.input, [{ type: "text", text: "retry me" }]);
 assert.equal("clientUserMessageId" in recoveredTurn.params, false);
+assert.equal("toolOutput" in recoveredTurn.params, false);
 assert.equal(recoveredTurn.params.turnTrigger, "safe-switch-auto-recovery");
 assert.equal(recoveredTurn.params.permissions, ":danger-full-access");
 assert.equal(recoveredTurn.params.approvalPolicy, "never");
@@ -173,6 +175,10 @@ assert.equal(
 const logPath = path.join(tempHome, ".codex", "safe-switch-proxy", "logs", "proxy.log");
 const log = fs.readFileSync(logPath, "utf8");
 assert.match(log, /"event":"recovery_succeeded"/);
+if (process.env.SAFE_SWITCH_TEST_STALL_READ === "1") {
+  assert.match(log, /"event":"history_read_fallback"/);
+  assert.equal(trace.filter(message => message.id === "history-read").length, 1);
+}
 assert.equal(log.includes("sk-1234567890abcdefghijkl"), false);
 
 process.stdout.write("safe-switch recovery test passed\n");

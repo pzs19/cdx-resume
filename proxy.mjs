@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import readline from "node:readline";
+import { EventEmitter } from "node:events";
 
 const args = process.argv.slice(2);
 const appServerIndex = args.indexOf("app-server");
@@ -181,6 +181,9 @@ function startProxy() {
         return true;
       }
 
+      // A timed-out internal response still belongs to us, never the desktop.
+      if (typeof message.id === "string" && message.id.startsWith(`safe-switch:${instanceId}:`)) return true;
+
       const client = clientRequests.get(key);
       if (client != null) {
         clientRequests.delete(key);
@@ -287,10 +290,18 @@ function startProxy() {
     sourceTurn,
   }) {
     log("recovery_started", { failedTurnId, sourceThreadId });
-    const readResult = await internalRequest("thread/read", {
-      includeTurns: true,
-      threadId: sourceThreadId,
-    });
+    let readResult;
+    try {
+      readResult = await internalRequest("thread/read", {
+        includeTurns: true,
+        threadId: sourceThreadId,
+      }, Number(process.env.SAFE_SWITCH_READ_TIMEOUT_MS) || 5_000);
+    } catch (error) {
+      log("history_read_fallback", { sourceThreadId, reason: safeErrorMessage(error) });
+      // Reading a loaded failed thread can stall in its original app-server.
+      // A separate read-only connection can read its persisted visible history.
+      readResult = await readThreadIndependently(sourceThreadId);
+    }
     const sourceThread = readResult?.thread;
     if (!sourceThread?.id || !sourceThread.cwd) {
       throw new Error("thread/read did not return usable source metadata");
@@ -390,6 +401,8 @@ function startProxy() {
     const recovered = structuredClone(original);
     recovered.threadId = newThreadId;
     delete recovered.clientUserMessageId;
+    // A failed tool continuation must not be replayed alongside user input.
+    delete recovered.toolOutput;
     copyDefinedFields(recovered, sourceSettings, [
       "approvalPolicy",
       "approvalsReviewer",
@@ -559,8 +572,8 @@ function startProxy() {
 
   process.stdin.setEncoding("utf8");
   child.stdout.setEncoding("utf8");
-  const clientLines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-  const serverLines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+  const clientLines = createJsonLines(process.stdin);
+  const serverLines = createJsonLines(child.stdout);
   clientLines.on("line", handleClientLine);
   serverLines.on("line", handleServerLine);
   clientLines.on("close", () => {
@@ -585,6 +598,88 @@ function startProxy() {
     if (!shuttingDown && !child.killed) child.kill();
   });
   log("proxy_started", { appServerPid: child.pid, realCodex });
+}
+
+
+// JSON-RPC is delimited by ASCII LF. U+2028/U+2029 are legal inside JSON
+// strings; Node's readline splits them and corrupts an otherwise valid response.
+function createJsonLines(input) {
+  const lines = new EventEmitter();
+  let fragments = [];
+  let closed = false;
+  input.setEncoding("utf8");
+  function onData(chunk) {
+    let start = 0;
+    let end;
+    while (!closed && (end = chunk.indexOf("\n", start)) !== -1) {
+      fragments.push(chunk.slice(start, end));
+      const line = fragments.join("");
+      fragments = [];
+      lines.emit("line", line);
+      start = end + 1;
+    }
+    if (!closed && start < chunk.length) fragments.push(chunk.slice(start));
+  }
+  function onEnd() {
+    if (!closed && fragments.length) lines.emit("line", fragments.join(""));
+    lines.close();
+  }
+  lines.close = () => {
+    if (closed) return;
+    closed = true;
+    fragments = [];
+    input.off("data", onData);
+    input.off("end", onEnd);
+    lines.emit("close");
+  };
+  input.on("data", onData);
+  input.on("end", onEnd);
+  return lines;
+}
+
+// This connection only initializes and reads history; it never resumes a turn.
+function readThreadIndependently(threadId) {
+  return new Promise((resolve, reject) => {
+    const reader = spawn(realCodex, ["app-server"], {
+      env: { ...process.env, SAFE_SWITCH_HISTORY_READER: "1" },
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    let settled = false;
+    const lines = createJsonLines(reader.stdout);
+    const timer = setTimeout(() => finish(new Error("independent thread/read timed out")), 30_000);
+    function finish(error, result) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      lines.close();
+      reader.stdin.end();
+      reader.kill("SIGTERM");
+      if (error) reject(error); else resolve(result);
+    }
+    function send(message) {
+      reader.stdin.write(`${JSON.stringify(message)}\n`);
+    }
+    reader.on("error", (error) => finish(error));
+    reader.stdin.on("error", (error) => finish(error));
+    reader.on("exit", () => finish(new Error("history reader exited before responding")));
+    lines.on("line", (line) => {
+      let message;
+      try { message = JSON.parse(line); } catch { return; }
+      if (message.id !== "history-init" && message.id !== "history-read") return;
+      if (message.error) return finish(new Error(message.error.message || "history read failed"));
+      if (message.id === "history-init") {
+        send({ method: "initialized", params: {} });
+        send({ id: "history-read", method: "thread/read", params: { threadId, includeTurns: true } });
+      } else {
+        if (message.result?.thread?.id !== threadId) return finish(new Error("history reader returned the wrong thread"));
+        finish(null, message.result);
+      }
+    });
+    send({ id: "history-init", method: "initialize", params: {
+      clientInfo: { name: "cdx-resume-history", version: "0.3.1" },
+      capabilities: { experimentalApi: true },
+    } });
+  });
 }
 
 function isEncryptedContentFailure(error) {
