@@ -1,12 +1,19 @@
-#!/bin/zsh
+#!/bin/sh
 set -eu
 
-proxy_dir=${0:A:h}
+proxy_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ ! -f "$proxy_dir/proxy.mjs" ] && [ -f "$proxy_dir/../proxy.mjs" ]; then
+  proxy_dir=$(CDPATH= cd -- "$proxy_dir/.." && pwd)
+fi
 resources_dir=${CODEX_ELECTRON_RESOURCES_PATH:-/Applications/ChatGPT.app/Contents/Resources}
 node_bin="$resources_dir/cua_node/bin/node"
 
-if [[ ! -x "$node_bin" ]]; then
-  node_bin=$(command -v node)
+if [ ! -x "$node_bin" ]; then
+  node_bin=$(command -v node || true)
+fi
+if [ -z "$node_bin" ]; then
+  printf '%s\n' 'cdx-resume: Node.js was not found.' >&2
+  exit 127
 fi
 
 exec "$node_bin" "$proxy_dir/proxy.mjs" "$@"

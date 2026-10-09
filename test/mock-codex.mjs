@@ -76,6 +76,7 @@ lines.on("line", (line) => {
   }
 
   if (message.method === "thread/resume") {
+    const resumedThreadId = message.params?.threadId || "source-thread";
     send({
       jsonrpc: "2.0",
       id: message.id,
@@ -90,7 +91,7 @@ lines.on("line", (line) => {
         runtimeWorkspaceRoots: ["/tmp/source-project", "/tmp/visualizations"],
         sandbox: { type: "dangerFullAccess" },
         serviceTier: "fast",
-        thread: { id: "source-thread", turns: [] },
+        thread: { id: resumedThreadId, turns: [] },
       },
     });
     return;

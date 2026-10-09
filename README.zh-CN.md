@@ -2,11 +2,11 @@
 
 [English](README.md)
 
-`cdx-resume` 是一个非官方的 macOS Codex Desktop 会话恢复代理。它解决切换账号后，旧任务中的账号绑定 `encrypted_content` 无法解密、导致任务不能继续的问题。
+`cdx-resume` 是一个非官方的自动恢复代理，支持 macOS Codex Desktop，以及 macOS/Linux 上的交互式 Codex CLI。它解决切换账号后，账号绑定的 `encrypted_content` 无法解密、导致任务不能继续的问题。
 
-仓库同时提供一个 Codex 个人插件。个人插件负责发现、安装和检查恢复代理；真正的自动恢复仍由 `CODEX_CLI_PATH` 代理完成，因为加密历史错误发生在普通 Skill 或生命周期 Hook 能处理之前。
+仓库同时提供 Codex 插件。插件负责发现、安装和状态检查；真正的恢复由本地代理自动完成，不需要模型参与。
 
-它**不会修改 `app.asar`，也不会破坏 App 签名**。它通过 `CODEX_CLI_PATH`，在桌面 App 与内置 Codex CLI 之间增加一个 JSON-RPC 代理。
+它**不会修改 `app.asar`、App 签名或真正的 Codex 可执行文件**。桌面版使用 `CODEX_CLI_PATH`，CLI 使用原生 `--remote unix://...` app-server 通道接入本地代理。
 
 ## 功能
 
@@ -16,6 +16,7 @@
 - 将可见的用户消息和助手回复复制到新任务，同时重建持久化的界面回合和分页索引，支持向上翻看旧消息。
 - 丢弃加密内容、隐藏推理和工具执行状态。
 - 在新任务中重试最后一条用户请求并自动打开它。
+- CLI 会自动关闭失败的 TUI，并在恢复后的任务上重新打开。
 - 继承源任务已经解析出的权限配置、审批策略、工作区根目录、环境及可用的 capability 配置。
 - 如果代理来不及观察源任务的运行时设置，则从最近一次持久化的 `turn_context` 读取作为兜底。
 
@@ -27,11 +28,11 @@ JSON-RPC 只按 ASCII LF 分包，保留消息文本里的 U+2028/U+2029。Node 
 
 ## 兼容性
 
-最初测试环境：
+测试环境：
 
-- Codex Desktop `26.831.21537`
-- 内置 `codex-cli 0.152.1`
-- macOS
+- macOS Codex Desktop
+- Linux `codex-cli 0.159.2`
+- macOS `codex-cli 0.161.0`
 
 本项目依赖内部 app-server 协议。Codex Desktop 升级后可能需要适配，升级后建议重新运行测试。
 
@@ -39,11 +40,11 @@ JSON-RPC 只按 ASCII LF 分包，保留消息文本里的 U+2028/U+2029。Node 
 
 ### 作为个人插件安装
 
-将本仓库加入个人 marketplace 后，可在 Codex 的 Plugins 页面安装 **Codex Resume**。插件内置的 `cdx-resume` Skill 会检查状态，并在用户明确要求时运行安装脚本。代理启用后仍需使用 `Cmd+Q` 完全退出 Codex Desktop，再重新打开。
+将本仓库加入个人或私有 Git marketplace，安装 **Codex Resume**，再让其管理 Skill 运行安装脚本。CLI 需要新开一个 shell；macOS 桌面版还需使用 `Cmd+Q` 完全退出并重新打开。
 
 ### 直接安装代理
 
-先将 Codex Desktop 安装到 `/Applications`，然后运行：
+先安装 Codex CLI，然后运行：
 
 ```bash
 git clone https://github.com/pzs19/cdx-resume.git ~/.codex/safe-switch-proxy
@@ -51,9 +52,9 @@ cd ~/.codex/safe-switch-proxy
 ./install.sh
 ```
 
-安装完成后，使用 `Cmd+Q` 完全退出 Codex Desktop，再重新打开。仅关闭窗口不会重启 app-server 进程。
+安装后新开一个 shell。macOS 上如果使用桌面版，还需使用 `Cmd+Q` 完全退出并重新打开。
 
-安装脚本还会创建当前用户的 LaunchAgent，使 `CODEX_CLI_PATH` 在重新登录或重启后自动恢复。
+macOS 上安装脚本还会创建 LaunchAgent，使桌面版拦截在重新登录或重启后自动恢复。
 
 ## 使用
 
@@ -67,7 +68,7 @@ git pull --ff-only
 ./install.sh
 ```
 
-然后完全退出并重新打开 Codex Desktop。
+然后新开一个 shell；macOS 桌面版还需完全退出并重新打开。
 
 ## 测试
 
@@ -92,7 +93,7 @@ git pull --ff-only
 ./uninstall.sh --remove-files
 ```
 
-之后完全退出并重新打开 Codex Desktop。
+之后新开一个 shell；macOS 桌面版还需完全退出并重新打开。
 
 ## 隐私与安全
 
@@ -104,12 +105,11 @@ git pull --ff-only
 
 ## 实现原理
 
-1. Codex Desktop 通过 `CODEX_CLI_PATH` 启动仓库中的 `codex` 包装器。
-2. 包装器使用 App 内置 Node.js 启动 `proxy.mjs`。
-3. 代理启动真正的内置 Codex CLI，并双向转发逐行 JSON-RPC 消息。
+1. Codex Desktop 通过 `CODEX_CLI_PATH` 进入包装器；交互式 CLI 通过 `PATH` 进入包装器。
+2. 桌面版直接转发 JSON-RPC；CLI TUI 通过本地 Unix WebSocket 桥接入同一套代理逻辑。
+3. 代理启动真正的 Codex app-server 并转发 JSON-RPC。
 4. 从 `thread/start`、`thread/resume`、`thread/settings/updated` 捕获已经解析的任务设置；冷启动时以持久化的 `turn_context` 兜底。
-5. 遇到匹配错误后，依次调用 `thread/read`、`thread/start`、`thread/inject_items`、`thread/name/set`
-   和 `turn/start`，并把源任务的权限与 capability 设置应用到新任务。
+5. 遇到匹配错误后创建干净任务、复制可见历史并恢复权限。桌面版直接重试回合；CLI 自动在恢复后的任务上重启原生 TUI 并重试请求。
 
 本项目是非官方工具，不由 OpenAI 提供支持。
 

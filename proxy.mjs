@@ -16,12 +16,19 @@ const appServerUtilityCommands = new Set([
   "generate-json-schema",
   "help",
 ]);
+const isInteractiveAppServer =
+  appServerIndex !== -1 &&
+  !args.slice(appServerIndex + 1).some((arg) => appServerUtilityCommands.has(arg));
 
 const resourcesDir =
   process.env.CODEX_ELECTRON_RESOURCES_PATH?.trim() ||
   "/Applications/ChatGPT.app/Contents/Resources";
-const realCodexCandidates = [
-  process.env.SAFE_SWITCH_REAL_CODEX?.trim(),
+const installDirectory = path.join(
+  process.env.CODEX_HOME || path.join(os.homedir(), ".codex"),
+  "safe-switch-proxy",
+);
+const storedRealCodex = readStoredRealCodex(path.join(installDirectory, "real-codex-path"));
+const desktopCodexCandidates = [
   path.join(resourcesDir, "codex"),
   path.join(resourcesDir, "codex-cli", "bin", "codex"),
   path.join(
@@ -32,8 +39,14 @@ const realCodexCandidates = [
     "MacOS",
     "codex",
   ),
+];
+const realCodexCandidates = [
+  process.env.SAFE_SWITCH_REAL_CODEX?.trim(),
+  ...(isInteractiveAppServer ? desktopCodexCandidates : []),
+  storedRealCodex,
+  ...desktopCodexCandidates,
 ].filter(Boolean);
-const realCodex = realCodexCandidates.find((candidate) => fs.existsSync(candidate));
+const realCodex = realCodexCandidates.find(isExecutableFile);
 
 if (!realCodex) {
   process.stderr.write(
@@ -42,16 +55,26 @@ if (!realCodex) {
   process.exit(127);
 }
 
-const isInteractiveAppServer =
-  appServerIndex !== -1 &&
-  !args.slice(appServerIndex + 1).some((arg) => appServerUtilityCommands.has(arg));
+if (process.env.SAFE_SWITCH_DISABLE_AUTO_RECOVERY === "1") {
+  runPassthrough();
+} else if (isInteractiveAppServer) {
+  startProxy();
+} else if (shouldSuperviseCli(args)) {
+  import("./cli-supervisor.mjs")
+    .then(({ runCliSupervisor }) => runCliSupervisor({ args, realCodex }))
+    .then(({ code, signal }) => exitLikeChild(code, signal))
+    .catch((error) => {
+      process.stderr.write(`cdx-resume CLI supervisor failed: ${safeErrorMessage(error)}\n`);
+      process.exit(1);
+    });
+} else {
+  runPassthrough();
+}
 
-if (!isInteractiveAppServer || process.env.SAFE_SWITCH_DISABLE_AUTO_RECOVERY === "1") {
+function runPassthrough() {
   const child = spawn(realCodex, args, { env: process.env, stdio: "inherit" });
   relaySignals(child);
   child.on("exit", (code, signal) => exitLikeChild(code, signal));
-} else {
-  startProxy();
 }
 
 function startProxy() {
@@ -60,6 +83,7 @@ function startProxy() {
     stdio: ["pipe", "pipe", "inherit"],
   });
   relaySignals(child);
+  const cliMode = process.env.SAFE_SWITCH_CLI_MODE === "1";
 
   const instanceId = crypto.randomUUID();
   let internalRequestSequence = 0;
@@ -223,6 +247,7 @@ function startProxy() {
         typeof threadId === "string" &&
         turn?.status === "failed" &&
         isEncryptedContentFailure(turn.error) &&
+        process.env.SAFE_SWITCH_SKIP_RECOVERY !== "1" &&
         !recoveryThreads.has(threadId)
       ) {
         const recoveryKey = `${threadId}:${turn.id || "unknown"}`;
@@ -326,8 +351,10 @@ function startProxy() {
       sourceThread,
       sourceTurn,
     });
+    const cliReplay = cliMode ? buildCliReplay(replay.params.input) : null;
+    const historyOmittedTurnId = cliReplay?.exact === false ? null : replay.omittedTurnId;
     const sourceSettings = resolveSourceSettings(sourceThread, replay.params);
-    const visibleItems = buildVisibleHistory(sourceThread.turns || [], replay.omittedTurnId);
+    const visibleItems = buildVisibleHistory(sourceThread.turns || [], historyOmittedTurnId);
     const newThreadParams = buildRecoveredThreadStartParams(
       sourceThread,
       replay.params,
@@ -364,7 +391,7 @@ function startProxy() {
             id: turn.id,
             startedAt: turn.startedAt,
             completedAt: turn.completedAt,
-            messages: buildVisibleHistory([turn], replay.omittedTurnId),
+            messages: buildVisibleHistory([turn], historyOmittedTurnId),
           })),
         });
         log("visible_history_restored", { newThreadId, copiedTurns: result.copiedTurns, copiedItems: result.copiedItems });
@@ -384,6 +411,23 @@ function startProxy() {
       } catch (error) {
         log("set_name_failed", { newThreadId, reason: safeErrorMessage(error) });
       }
+    }
+
+    if (cliMode) {
+      pendingThreadRepairs.set(newThreadId, sourceSettings);
+      persistPendingThreadRepairs(pendingRepairPath, pendingThreadRepairs);
+      const result = {
+        type: "cli-recovery-prepared",
+        copiedVisibleItems: visibleItems.length,
+        failedTurnId: replay.omittedTurnId,
+        images: cliReplay.images,
+        newThreadId,
+        prompt: cliReplay.prompt,
+        sourceThreadId,
+      };
+      emitCliRecovery(result);
+      log("cli_recovery_prepared", result);
+      return result;
     }
 
     const recoveredTurnParams = buildRecoveredTurnParams(
@@ -719,6 +763,142 @@ function readThreadIndependently(threadId) {
       capabilities: { experimentalApi: true },
     } });
   });
+}
+
+function shouldSuperviseCli(cliArgs) {
+  if (process.env.SAFE_SWITCH_CLI_CHILD === "1") return false;
+  if (cliArgs.includes("--remote") || cliArgs.some((arg) => arg.startsWith("--remote="))) {
+    return false;
+  }
+  const forced = process.env.SAFE_SWITCH_FORCE_CLI_PROXY === "1";
+  if (!forced && (!process.stdin.isTTY || !process.stdout.isTTY)) return false;
+  if (cliArgs.some((arg) => ["-h", "--help", "-V", "--version"].includes(arg))) return false;
+
+  const valueOptions = new Set([
+    "-c",
+    "--config",
+    "--enable",
+    "--disable",
+    "--remote-auth-token-env",
+    "-i",
+    "--image",
+    "-m",
+    "--model",
+    "--local-provider",
+    "-p",
+    "--profile",
+    "-s",
+    "--sandbox",
+    "-C",
+    "--cd",
+    "--add-dir",
+    "-a",
+    "--ask-for-approval",
+  ]);
+  let command = null;
+  for (let index = 0; index < cliArgs.length; index += 1) {
+    const arg = cliArgs[index];
+    if (valueOptions.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) continue;
+    command = arg;
+    break;
+  }
+  if (command == null) return true;
+  if (command === "resume" || command === "fork") return true;
+  const nonInteractiveCommands = new Set([
+    "agents",
+    "exec",
+    "e",
+    "review",
+    "login",
+    "logout",
+    "mcp",
+    "plugin",
+    "app-server",
+    "remote-control",
+    "app",
+    "completion",
+    "update",
+    "doctor",
+    "sandbox",
+    "debug",
+    "apply",
+    "a",
+    "queue",
+    "archive",
+    "delete",
+    "migrate-rollouts",
+    "unarchive",
+    "cloud",
+    "exec-server",
+    "features",
+    "help",
+  ]);
+  return !nonInteractiveCommands.has(command);
+}
+
+function buildCliReplay(input) {
+  const text = [];
+  const images = [];
+  let supportedParts = 0;
+  let unsupported = false;
+  for (const part of Array.isArray(input) ? input : []) {
+    if (part?.type === "text" && typeof part.text === "string") {
+      if (!isSyntheticUserText(part.text)) {
+        text.push(part.text);
+        supportedParts += 1;
+      }
+    } else if (part?.type === "localImage") {
+      const imagePath = part.path || part.file || part.imagePath;
+      if (typeof imagePath === "string" && imagePath) {
+        images.push(imagePath);
+        supportedParts += 1;
+      } else {
+        unsupported = true;
+      }
+    } else if (part != null) {
+      unsupported = true;
+    }
+  }
+  const exact = supportedParts > 0 && !unsupported;
+  return {
+    exact,
+    images: exact ? images : [],
+    prompt:
+      exact && text.length > 0
+        ? text.join("\n\n")
+        : "Continue the latest unfinished user request from the visible conversation above.",
+  };
+}
+
+function emitCliRecovery(message) {
+  try {
+    fs.writeSync(3, `${JSON.stringify(message)}\n`);
+  } catch (error) {
+    throw new Error(`could not notify CLI supervisor: ${safeErrorMessage(error)}`);
+  }
+}
+
+function readStoredRealCodex(filePath) {
+  try {
+    const value = fs.readFileSync(filePath, "utf8").trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+function isExecutableFile(filePath) {
+  if (typeof filePath !== "string" || !filePath) return false;
+  try {
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function isEncryptedContentFailure(error) {

@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "cdx-resume",
-  "version": "0.1.1",
-  "description": "Recover Codex desktop chats after invalid encrypted-content errors and manage the local recovery proxy.",
+  "version": "0.2.0",
+  "description": "Automatically recover Codex Desktop and CLI sessions after invalid encrypted-content errors.",
   "author": {
     "name": "pzs19",
     "url": "https://github.com/pzs19"
@@ -15,6 +15,8 @@
     "recovery",
     "encrypted-content",
     "desktop",
+    "cli",
+    "linux",
     "session"
   ],
   "extensions": {
@@ -22,7 +24,7 @@
       "interface": {
         "displayName": "Codex Resume",
         "shortDescription": "Recover chats with broken encrypted history",
-        "longDescription": "Diagnose, install, and maintain the local cdx-resume proxy that recreates Codex desktop chats when account-bound encrypted history can no longer be decrypted.",
+        "longDescription": "Install and maintain the local cdx-resume proxy that automatically recreates Codex Desktop and interactive CLI sessions when account-bound encrypted history can no longer be decrypted.",
         "developerName": "pzs19",
         "category": "Productivity",
         "websiteURL": "https://github.com/pzs19/cdx-resume",
