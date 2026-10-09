@@ -12,6 +12,7 @@ CDX_RESUME_SKIP_LAUNCHCTL=1 \
 
 test -x "$test_home/.codex/safe-switch-proxy/codex"
 test -x "$test_home/.codex/safe-switch-proxy/proxy.mjs"
+test -x "$test_home/.codex/safe-switch-proxy/status.sh"
 test ! -f "$test_home/.codex/prompts/goanyway.md"
 grep -Fq 'export CODEX_CLI_PATH="$HOME/.codex/safe-switch-proxy/codex"' \
   "$test_home/.zprofile"

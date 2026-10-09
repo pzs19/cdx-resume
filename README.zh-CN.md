@@ -4,6 +4,8 @@
 
 `cdx-resume` 是一个非官方的 macOS Codex Desktop 会话恢复代理。它解决切换账号后，旧任务中的账号绑定 `encrypted_content` 无法解密、导致任务不能继续的问题。
 
+仓库同时提供一个 Codex 个人插件。个人插件负责发现、安装和检查恢复代理；真正的自动恢复仍由 `CODEX_CLI_PATH` 代理完成，因为加密历史错误发生在普通 Skill 或生命周期 Hook 能处理之前。
+
 它**不会修改 `app.asar`，也不会破坏 App 签名**。它通过 `CODEX_CLI_PATH`，在桌面 App 与内置 Codex CLI 之间增加一个 JSON-RPC 代理。
 
 ## 功能
@@ -34,6 +36,12 @@ JSON-RPC 只按 ASCII LF 分包，保留消息文本里的 U+2028/U+2029。Node 
 本项目依赖内部 app-server 协议。Codex Desktop 升级后可能需要适配，升级后建议重新运行测试。
 
 ## 安装
+
+### 作为个人插件安装
+
+将本仓库加入个人 marketplace 后，可在 Codex 的 Plugins 页面安装 **Codex Resume**。插件内置的 `cdx-resume` Skill 会检查状态，并在用户明确要求时运行安装脚本。代理启用后仍需使用 `Cmd+Q` 完全退出 Codex Desktop，再重新打开。
+
+### 直接安装代理
 
 先将 Codex Desktop 安装到 `/Applications`，然后运行：
 

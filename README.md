@@ -4,6 +4,8 @@
 
 `cdx-resume` is an unofficial recovery shim for Codex Desktop on macOS. It lets a conversation continue after switching between accounts when account-bound `encrypted_content` can no longer be decrypted.
 
+The repository also ships as a personal Codex plugin. The plugin handles discovery, installation, and health checks; automatic recovery still runs through the `CODEX_CLI_PATH` proxy because encrypted-history failures happen before an ordinary skill or lifecycle hook can repair the turn.
+
 It does **not** modify `app.asar` or replace the signed application bundle. Instead, it uses Codex Desktop's `CODEX_CLI_PATH` override to place a small JSON-RPC proxy between the desktop app and its bundled Codex CLI.
 
 ## What it does
@@ -36,6 +38,12 @@ Initially tested with:
 This project relies on an internal app-server protocol. A Codex Desktop update may require changes. Run the tests again after upgrading.
 
 ## Install
+
+### Personal plugin
+
+Add this repository to a personal marketplace, then install **Codex Resume** from the Codex Plugins page. Its bundled `cdx-resume` skill checks status and runs the installer when the user explicitly asks. After enabling the proxy, fully quit Codex Desktop with `Cmd+Q` and reopen it.
+
+### Direct proxy installation
 
 Install Codex Desktop in `/Applications`, then:
 

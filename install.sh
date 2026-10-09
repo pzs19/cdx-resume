@@ -9,9 +9,20 @@ profile_path="$HOME/.zprofile"
 launch_agent="$HOME/Library/LaunchAgents/com.pzs19.cdx-resume.plist"
 resources_dir=${CODEX_ELECTRON_RESOURCES_PATH:-/Applications/ChatGPT.app/Contents/Resources}
 node_bin="$resources_dir/cua_node/bin/node"
+real_codex=""
 
-if [[ "${CDX_RESUME_SKIP_APP_CHECK:-0}" != "1" && ! -x "$resources_dir/codex" ]]; then
-  print -u2 "Codex CLI was not found at: $resources_dir/codex"
+for candidate in \
+  "$resources_dir/codex" \
+  "$resources_dir/codex-cli/bin/codex" \
+  "$resources_dir/codex-cli/CodexCLI.app/Contents/MacOS/codex"; do
+  if [[ -x "$candidate" ]]; then
+    real_codex="$candidate"
+    break
+  fi
+done
+
+if [[ "${CDX_RESUME_SKIP_APP_CHECK:-0}" != "1" && -z "$real_codex" ]]; then
+  print -u2 "Codex CLI was not found under: $resources_dir"
   print -u2 "Install the Codex desktop app in /Applications, or set CODEX_ELECTRON_RESOURCES_PATH."
   exit 1
 fi
@@ -32,6 +43,7 @@ if [[ "$repo_dir" != "$install_dir" ]]; then
   install -m 644 "$repo_dir/history.mjs" "$install_dir/history.mjs"
   install -m 755 "$repo_dir/install.sh" "$install_dir/install.sh"
   install -m 755 "$repo_dir/uninstall.sh" "$install_dir/uninstall.sh"
+  install -m 755 "$repo_dir/scripts/status.sh" "$install_dir/status.sh"
   install -m 700 "$repo_dir/test/mock-codex.mjs" "$install_dir/test/mock-codex.mjs"
   install -m 700 "$repo_dir/test/recovery.test.mjs" "$install_dir/test/recovery.test.mjs"
   install -m 700 "$repo_dir/test/history.test.mjs" "$install_dir/test/history.test.mjs"
@@ -39,7 +51,7 @@ if [[ "$repo_dir" != "$install_dir" ]]; then
   install -m 700 "$repo_dir/test/passthrough.test.mjs" "$install_dir/test/passthrough.test.mjs"
 fi
 
-chmod 755 "$install_dir/codex" "$install_dir/proxy.mjs"
+chmod 755 "$install_dir/codex" "$install_dir/proxy.mjs" "$install_dir/status.sh"
 chmod 700 "$install_dir/test/"*.mjs
 chmod 700 "$install_dir/logs"
 rm -f "$install_dir/test/goanyway.test.mjs"

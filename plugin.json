@@ -1,0 +1,39 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "cdx-resume",
+  "version": "0.1.1",
+  "description": "Recover Codex desktop chats after invalid encrypted-content errors and manage the local recovery proxy.",
+  "author": {
+    "name": "pzs19",
+    "url": "https://github.com/pzs19"
+  },
+  "homepage": "https://github.com/pzs19/cdx-resume",
+  "repository": "https://github.com/pzs19/cdx-resume",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "recovery",
+    "encrypted-content",
+    "desktop",
+    "session"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Codex Resume",
+        "shortDescription": "Recover chats with broken encrypted history",
+        "longDescription": "Diagnose, install, and maintain the local cdx-resume proxy that recreates Codex desktop chats when account-bound encrypted history can no longer be decrypted.",
+        "developerName": "pzs19",
+        "category": "Productivity",
+        "websiteURL": "https://github.com/pzs19/cdx-resume",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/icon.png",
+        "defaultPrompt": [
+          "Check whether Codex Resume is active and repair it if needed",
+          "Recover this Codex chat after an invalid encrypted content error"
+        ],
+        "brandColor": "#10A37F"
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="background" x1="120" y1="80" x2="900" y2="940" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071A34"/>
+      <stop offset="0.55" stop-color="#123A5B"/>
+      <stop offset="1" stop-color="#075E6D"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="322" y1="244" x2="786" y2="804" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#70E7FF"/>
+      <stop offset="1" stop-color="#21B8D8"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="24" y="24" width="976" height="976" rx="230" fill="url(#background)"/>
+  <rect x="46" y="46" width="932" height="932" rx="208" fill="none" stroke="#B9F4FF" stroke-opacity="0.13" stroke-width="12"/>
+
+  <path d="M260 290C260 229 309 180 370 180H654C715 180 764 229 764 290V490C764 551 715 600 654 600H474L342 704V600H370C309 600 260 551 260 490V290Z"
+        fill="#F2FCFF" fill-opacity="0.98"/>
+  <path d="M366 330H658" stroke="#1B4563" stroke-width="52" stroke-linecap="round"/>
+  <path d="M366 442H558" stroke="#63CDE3" stroke-width="52" stroke-linecap="round"/>
+
+  <path d="M746 491C817 560 837 667 789 758C726 878 578 924 458 861C404 833 362 788 338 733"
+        fill="none" stroke="url(#arrow)" stroke-width="76" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M258 704L400 640L373 790Z" fill="#70E7FF" filter="url(#glow)"/>
+</svg>

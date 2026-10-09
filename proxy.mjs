@@ -20,11 +20,25 @@ const appServerUtilityCommands = new Set([
 const resourcesDir =
   process.env.CODEX_ELECTRON_RESOURCES_PATH?.trim() ||
   "/Applications/ChatGPT.app/Contents/Resources";
-const realCodex =
-  process.env.SAFE_SWITCH_REAL_CODEX?.trim() || path.join(resourcesDir, "codex");
+const realCodexCandidates = [
+  process.env.SAFE_SWITCH_REAL_CODEX?.trim(),
+  path.join(resourcesDir, "codex"),
+  path.join(resourcesDir, "codex-cli", "bin", "codex"),
+  path.join(
+    resourcesDir,
+    "codex-cli",
+    "CodexCLI.app",
+    "Contents",
+    "MacOS",
+    "codex",
+  ),
+].filter(Boolean);
+const realCodex = realCodexCandidates.find((candidate) => fs.existsSync(candidate));
 
-if (!fs.existsSync(realCodex)) {
-  process.stderr.write(`Safe Switch: real Codex binary not found: ${realCodex}\n`);
+if (!realCodex) {
+  process.stderr.write(
+    `Safe Switch: real Codex binary not found. Checked: ${realCodexCandidates.join(", ")}\n`,
+  );
   process.exit(127);
 }
 
