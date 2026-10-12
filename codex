@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 
+# Keep Codex traffic on the lab627c1 CONNECT tunnel. Unlike the old local
+# Responses gateway, this preserves the native WebSocket transport end to end.
+codex_proxy_url=${CODEX_UPSTREAM_PROXY_URL:-http://127.0.0.1:62333}
+export http_proxy="$codex_proxy_url" https_proxy="$codex_proxy_url" all_proxy="$codex_proxy_url"
+export HTTP_PROXY="$codex_proxy_url" HTTPS_PROXY="$codex_proxy_url" ALL_PROXY="$codex_proxy_url"
+
 proxy_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if [ ! -f "$proxy_dir/proxy.mjs" ] && [ -f "$proxy_dir/../proxy.mjs" ]; then
   proxy_dir=$(CDPATH= cd -- "$proxy_dir/.." && pwd)

@@ -102,11 +102,15 @@ function recoveredArgs(recovery) {
 
 function chooseSocketPath(iteration) {
   const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-  let directory = path.join(codexHome, "safe-switch-proxy", "state");
-  let candidate = path.join(directory, `cli-${process.pid}-${iteration}.sock`);
+  const runtimeDirectory = process.env.XDG_RUNTIME_DIR?.trim();
+  let directory =
+    runtimeDirectory && path.isAbsolute(runtimeDirectory)
+      ? path.join(runtimeDirectory, "cdx-r")
+      : path.join(codexHome, "safe-switch-proxy", "state");
+  let candidate = path.join(directory, `${process.pid}-${iteration}`);
   if (Buffer.byteLength(candidate) > 96) {
     directory = path.join(os.tmpdir(), `cdx-resume-${process.getuid?.() ?? "user"}`);
-    candidate = path.join(directory, `cli-${process.pid}-${iteration}.sock`);
+    candidate = path.join(directory, `${process.pid}-${iteration}`);
   }
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   fs.chmodSync(directory, 0o700);

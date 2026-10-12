@@ -11,6 +11,7 @@ const proxy = path.join(root, "proxy.mjs");
 const mockBackend = path.join(import.meta.dirname, "mock-codex.mjs");
 const mockTui = path.join(import.meta.dirname, "mock-cli-tui.mjs");
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "safe-switch-cli-test-"));
+const runtimeDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "cdx-r-test-"));
 const backendTrace = path.join(tempHome, "backend-trace.jsonl");
 const tuiTrace = path.join(tempHome, "tui-trace.jsonl");
 
@@ -19,6 +20,7 @@ const child = spawn(process.execPath, [proxy], {
     ...process.env,
     CODEX_HOME: path.join(tempHome, ".codex"),
     HOME: tempHome,
+    XDG_RUNTIME_DIR: runtimeDirectory,
     SAFE_SWITCH_DISABLE_NAVIGATION: "1",
     SAFE_SWITCH_FORCE_CLI_PROXY: "1",
     SAFE_SWITCH_REAL_CODEX: mockBackend,
@@ -50,6 +52,11 @@ const tuiEvents = fs
   .map(JSON.parse);
 const invocations = tuiEvents.filter((event) => event.type === "tui-invocation");
 assert.equal(invocations.length, 2);
+for (const invocation of invocations) {
+  const remoteIndex = invocation.args.indexOf("--remote");
+  assert.equal(remoteIndex >= 0, true);
+  assert.match(invocation.args[remoteIndex + 1], new RegExp(`^unix://${runtimeDirectory}/cdx-r/\\d+-\\d+$`));
+}
 assert.equal(invocations[0].sourceThreadId, "source-thread");
 assert.equal(invocations[1].sourceThreadId, "recovered-thread");
 assert.equal(invocations[1].prompt, "retry me");
