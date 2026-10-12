@@ -7,6 +7,14 @@ codex_proxy_url=${CODEX_UPSTREAM_PROXY_URL:-http://127.0.0.1:62333}
 export http_proxy="$codex_proxy_url" https_proxy="$codex_proxy_url" all_proxy="$codex_proxy_url"
 export HTTP_PROXY="$codex_proxy_url" HTTPS_PROXY="$codex_proxy_url" ALL_PROXY="$codex_proxy_url"
 
+gateway_profile=${CDX_GATEWAY_PROFILE:-lab627c1-rust}
+gateway_provider=${CDX_GATEWAY_PROVIDER_BIN:-$HOME/.local/bin/cdx-gateway-provider}
+if [ ! -x "$gateway_provider" ]; then
+  printf '%s\n' "cdx-resume: credential synchronizer was not found: $gateway_provider" >&2
+  exit 1
+fi
+"$gateway_provider" sync-auth --profile "$gateway_profile" >/dev/null
+
 proxy_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if [ ! -f "$proxy_dir/proxy.mjs" ] && [ -f "$proxy_dir/../proxy.mjs" ]; then
   proxy_dir=$(CDPATH= cd -- "$proxy_dir/.." && pwd)
